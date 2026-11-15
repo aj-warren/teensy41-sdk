@@ -1,4 +1,4 @@
-add_library(teensy_sdk OBJECT
+add_library(teensy_sdk STATIC
     src/adc.c
     src/bootdata.c
     src/boottime.c

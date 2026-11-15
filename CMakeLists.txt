@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(teensy41 C)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(teensy41 C)
+    set(_teensy41_sdk_default_standalone ON)
+else()
+    set(_teensy41_sdk_default_standalone OFF)
+endif()
+
+option(TEENSY41_SDK_BUILD_STANDALONE
+    "Build the SDK's firmware and examples when used as a top-level project"
+    ${_teensy41_sdk_default_standalone})
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -21,12 +30,14 @@ set(TEENSY_CPU_FLAGS
     -mcpu=cortex-m7
     -mthumb
     -mfpu=fpv5-d16
-    -mfloat-abi=hard)
+    -mfloat-abi=hard
+    CACHE INTERNAL "Teensy 4.1 CPU flags")
 
 set(TEENSY_DEFINITIONS
     __IMXRT1062__
     ARDUINO_TEENSY41
-    F_CPU=600000000)
+    F_CPU=600000000
+    CACHE INTERNAL "Teensy 4.1 compile definitions")
 
 execute_process(
     COMMAND "${CMAKE_C_COMPILER}" -print-sysroot
@@ -34,7 +45,8 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
     RESULT_VARIABLE ARM_GCC_SYSROOT_RESULT)
 if(ARM_GCC_SYSROOT_RESULT EQUAL 0 AND IS_DIRECTORY "${ARM_GCC_SYSROOT}/include")
-    set(TEENSY_SYSROOT_INCLUDE_FLAG "-isystem${ARM_GCC_SYSROOT}/include")
+    set(TEENSY_SYSROOT_INCLUDE_FLAG "-isystem${ARM_GCC_SYSROOT}/include"
+        CACHE INTERNAL "ARM sysroot include flag")
 endif()
 execute_process(
     COMMAND "${CMAKE_C_COMPILER}" -print-file-name=include
@@ -42,10 +54,12 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
     RESULT_VARIABLE ARM_GCC_INCLUDE_RESULT)
 if(ARM_GCC_INCLUDE_RESULT EQUAL 0 AND IS_DIRECTORY "${ARM_GCC_INCLUDE}")
-    set(TEENSY_GCC_INCLUDE_FLAG "-isystem${ARM_GCC_INCLUDE}")
+    set(TEENSY_GCC_INCLUDE_FLAG "-isystem${ARM_GCC_INCLUDE}"
+        CACHE INTERNAL "ARM GCC include flag")
 endif()
 
-set(TEENSY_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/sdk/linker/imxrt1062_t41.ld")
+set(TEENSY_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/sdk/linker/imxrt1062_t41.ld"
+    CACHE FILEPATH "Teensy 4.1 linker script")
 
 add_subdirectory(sdk)
 
@@ -65,7 +79,8 @@ function(teensy_target_options target)
         -Wextra
         -ffunction-sections
         -fdata-sections
-        -Os)
+        -Os
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>)
 
     target_link_options(${target} PRIVATE
         ${TEENSY_CPU_FLAGS}
@@ -90,6 +105,22 @@ function(teensy_target_options target)
 endfunction()
 
 # Per-target HEX/BIN generation (main and examples).
+function(teensy_add_flash_target target)
+    if(TEENSY_LOADER_CLI)
+        add_custom_target(flash-${target}
+            COMMAND "${TEENSY_LOADER_CLI}" --mcu=TEENSY41 -svw
+                "${CMAKE_CURRENT_BINARY_DIR}/${target}.hex"
+            DEPENDS ${target}-hex
+            USES_TERMINAL
+            VERBATIM)
+        if(TARGET vendored_loader_cli)
+            add_dependencies(flash-${target} vendored_loader_cli)
+        endif()
+    else()
+        message(STATUS "teensy_loader_cli not found; flash-${target} is unavailable")
+    endif()
+endfunction()
+
 function(teensy_add_hex_target target)
     set(hex "${CMAKE_CURRENT_BINARY_DIR}/${target}.hex")
     set(bin "${CMAKE_CURRENT_BINARY_DIR}/${target}.bin")
@@ -105,17 +136,15 @@ function(teensy_add_hex_target target)
         VERBATIM)
     add_custom_target(${target}-hex DEPENDS "${hex}")
     add_custom_target(${target}-bin DEPENDS "${bin}")
-
-    if(TARGET vendored_loader_cli)
-        add_custom_target(flash-${target} DEPENDS ${target}-hex vendored_loader_cli)
-    else()
-        add_custom_target(flash-${target} DEPENDS ${target}-hex)
-    endif()
+    teensy_add_flash_target(${target})
 endfunction()
 
 find_program(ARM_SIZE arm-none-eabi-size)
 find_program(ARM_OBJCOPY arm-none-eabi-objcopy)
 find_program(ARM_OBJDUMP arm-none-eabi-objdump)
+if(TEENSY_LOADER_CLI AND NOT EXISTS "${TEENSY_LOADER_CLI}")
+    unset(TEENSY_LOADER_CLI CACHE)
+endif()
 find_program(TEENSY_LOADER_CLI teensy_loader_cli)
 
 # The vendored CLI adds macOS soft-reboot (no button press needed) and provides
@@ -161,7 +190,8 @@ if(CMAKE_HOST_APPLE)
     endif()
 endif()
 
-if(CMAKE_HOST_WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli/CMakeLists.txt")
+if(CMAKE_HOST_WIN32 AND NOT TEENSY_LOADER_CLI
+    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli/CMakeLists.txt")
     set(TEENSY_LOADER_BUILD_DIR
         "${CMAKE_CURRENT_BINARY_DIR}/teensy_loader_cli")
     set(TEENSY_LOADER_CLI_LOCAL
@@ -187,51 +217,45 @@ if(CMAKE_HOST_WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_
         CACHE FILEPATH "teensy_loader_cli executable" FORCE)
 endif()
 
-# Main application (src/main.c).
-teensy_target_options(teensy41 WITH_MAP MAPFILE teensy41.map src/main.c)
-set_property(TARGET teensy41 APPEND PROPERTY LINK_DEPENDS "${TEENSY_LINKER_SCRIPT}")
+if(TEENSY41_SDK_BUILD_STANDALONE)
+    # Main application (src/main.c).
+    teensy_target_options(teensy41 WITH_MAP MAPFILE teensy41.map src/main.c)
+    set_property(TARGET teensy41 APPEND PROPERTY LINK_DEPENDS "${TEENSY_LINKER_SCRIPT}")
 
-if(ARM_SIZE)
-    add_custom_command(TARGET teensy41 POST_BUILD
-        COMMAND "${ARM_SIZE}" "$<TARGET_FILE:teensy41>"
-        VERBATIM)
-endif()
-
-if(ARM_OBJDUMP)
-    set(TEENSY41_ASM "${CMAKE_CURRENT_BINARY_DIR}/teensy41.s")
-
-    add_custom_command(TARGET teensy41 POST_BUILD
-        COMMAND "${CMAKE_COMMAND}"
-            "-DOBJDUMP=${ARM_OBJDUMP}"
-            "-DINPUT=$<TARGET_FILE:teensy41>"
-            "-DOUTPUT=${TEENSY41_ASM}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/disassemble.cmake"
-        BYPRODUCTS "${TEENSY41_ASM}"
-        VERBATIM)
-else()
-    message(STATUS "arm-none-eabi-objdump not found; disassembly is unavailable")
-endif()
-
-if(ARM_OBJCOPY)
-    teensy_add_hex_target(teensy41)
-    add_custom_target(bin DEPENDS teensy41-bin)
-
-    if(TEENSY_LOADER_CLI)
-        add_custom_target(flash
-            COMMAND "${TEENSY_LOADER_CLI}" --mcu=TEENSY41 -svw
-                "${CMAKE_CURRENT_BINARY_DIR}/teensy41.hex"
-            DEPENDS teensy41-hex
-            USES_TERMINAL
+    if(ARM_SIZE)
+        add_custom_command(TARGET teensy41 POST_BUILD
+            COMMAND "${ARM_SIZE}" "$<TARGET_FILE:teensy41>"
             VERBATIM)
-        if(TARGET vendored_loader_cli)
-            add_dependencies(flash vendored_loader_cli)
+    endif()
+
+    if(ARM_OBJDUMP)
+        set(TEENSY41_ASM "${CMAKE_CURRENT_BINARY_DIR}/teensy41.s")
+
+        add_custom_command(TARGET teensy41 POST_BUILD
+            COMMAND "${CMAKE_COMMAND}"
+                "-DOBJDUMP=${ARM_OBJDUMP}"
+                "-DINPUT=$<TARGET_FILE:teensy41>"
+                "-DOUTPUT=${TEENSY41_ASM}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/disassemble.cmake"
+            BYPRODUCTS "${TEENSY41_ASM}"
+            VERBATIM)
+    else()
+        message(STATUS "arm-none-eabi-objdump not found; disassembly is unavailable")
+    endif()
+
+    if(ARM_OBJCOPY)
+        teensy_add_hex_target(teensy41)
+        add_custom_target(bin DEPENDS teensy41-bin)
+
+        if(TARGET flash-teensy41)
+            add_custom_target(flash DEPENDS flash-teensy41)
+        else()
+            message(STATUS "the flash target is unavailable")
         endif()
     else()
-        message(STATUS "teensy_loader_cli not found; the flash target is unavailable")
+        message(STATUS "arm-none-eabi-objcopy not found; HEX/BIN targets are unavailable")
     endif()
-else()
-    message(STATUS "arm-none-eabi-objcopy not found; HEX/BIN targets are unavailable")
-endif()
 
-# One example per feature; targets: example-<name>, flash-<name>.
-add_subdirectory(examples)
+    # One example per feature; targets: example-<name>, flash-<name>.
+    add_subdirectory(examples)
+endif()
