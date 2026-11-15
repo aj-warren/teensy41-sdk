@@ -118,9 +118,9 @@ find_program(ARM_OBJCOPY arm-none-eabi-objcopy)
 find_program(ARM_OBJDUMP arm-none-eabi-objdump)
 find_program(TEENSY_LOADER_CLI teensy_loader_cli)
 
-# The vendored CLI adds macOS soft-reboot (no button press needed); it is
-# built from tools/teensy_loader_cli with a custom_target below and preferred
-# over whatever PATH provides.  The binary itself is not tracked in git.
+# The vendored CLI adds macOS soft-reboot (no button press needed) and provides
+# a native Windows build.  It is preferred over whatever PATH provides, and
+# the binary itself is not tracked in git.
 set(TEENSY_LOADER_CLI_LOCAL
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli/teensy_loader_cli")
 
@@ -151,7 +151,7 @@ if(CMAKE_HOST_APPLE)
             OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli/teensy_loader_cli"
             COMMAND make OS=MACOSX "SDK=${TEENSY_LOADER_SDK}"
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli"
-            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli/teensy_loader_cli.c"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli/teensy_loader_cli.cpp"
             COMMENT "Building vendored teensy_loader_cli"
             VERBATIM)
         add_custom_target(vendored_loader_cli
@@ -159,6 +159,32 @@ if(CMAKE_HOST_APPLE)
         set(TEENSY_LOADER_CLI "${TEENSY_LOADER_CLI_LOCAL}"
             CACHE FILEPATH "teensy_loader_cli executable" FORCE)
     endif()
+endif()
+
+if(CMAKE_HOST_WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli/CMakeLists.txt")
+    set(TEENSY_LOADER_BUILD_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/teensy_loader_cli")
+    set(TEENSY_LOADER_CLI_LOCAL
+        "${TEENSY_LOADER_BUILD_DIR}/teensy_loader_cli${CMAKE_EXECUTABLE_SUFFIX}")
+
+    add_custom_command(
+        OUTPUT "${TEENSY_LOADER_CLI_LOCAL}"
+        COMMAND "${CMAKE_COMMAND}"
+            -S "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli"
+            -B "${TEENSY_LOADER_BUILD_DIR}"
+            -G "${CMAKE_GENERATOR}"
+        COMMAND "${CMAKE_COMMAND}"
+            --build "${TEENSY_LOADER_BUILD_DIR}"
+            --target teensy_loader_cli
+        DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli/CMakeLists.txt"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/teensy_loader_cli/teensy_loader_cli.cpp"
+        COMMENT "Building native teensy_loader_cli"
+        VERBATIM)
+    add_custom_target(vendored_loader_cli
+        DEPENDS "${TEENSY_LOADER_CLI_LOCAL}")
+    set(TEENSY_LOADER_CLI "${TEENSY_LOADER_CLI_LOCAL}"
+        CACHE FILEPATH "teensy_loader_cli executable" FORCE)
 endif()
 
 # Main application (src/main.c).
@@ -173,9 +199,13 @@ endif()
 
 if(ARM_OBJDUMP)
     set(TEENSY41_ASM "${CMAKE_CURRENT_BINARY_DIR}/teensy41.s")
+
     add_custom_command(TARGET teensy41 POST_BUILD
-        COMMAND sh -c
-            "\"${ARM_OBJDUMP}\" -d \"$<TARGET_FILE:teensy41>\" > \"${TEENSY41_ASM}\""
+        COMMAND "${CMAKE_COMMAND}"
+            "-DOBJDUMP=${ARM_OBJDUMP}"
+            "-DINPUT=$<TARGET_FILE:teensy41>"
+            "-DOUTPUT=${TEENSY41_ASM}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/disassemble.cmake"
         BYPRODUCTS "${TEENSY41_ASM}"
         VERBATIM)
 else()

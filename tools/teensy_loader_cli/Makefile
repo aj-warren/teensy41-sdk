@@ -1,5 +1,5 @@
-OS ?= LINUX
-#OS ?= WINDOWS
+#OS ?= LINUX
+OS ?= WINDOWS
 #OS ?= MACOSX
 #OS ?= BSD
 
@@ -9,47 +9,47 @@ OS ?= LINUX
 #USE_LIBUSB ?= YES
 
 ifeq ($(OS), LINUX)  # also works on FreeBSD
-CC ?= gcc
-CFLAGS ?= -O2 -Wall
-teensy_loader_cli: teensy_loader_cli.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) -s -DUSE_LIBUSB -o teensy_loader_cli teensy_loader_cli.c -lusb $(LDFLAGS)
+CXX ?= c++
+CXXFLAGS ?= -O2 -Wall -std=c++17
+teensy_loader_cli: teensy_loader_cli.cpp
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -s -DUSE_LIBUSB -o teensy_loader_cli teensy_loader_cli.cpp -lusb $(LDFLAGS)
 
 
 else ifeq ($(OS), WINDOWS)
-CC ?= i586-mingw32msvc-gcc
-CFLAGS ?= -O2 -Wall
-teensy_loader_cli.exe: teensy_loader_cli.c
-	$(CC) $(CFLAGS) -s -DUSE_WIN32 -o teensy_loader_cli.exe teensy_loader_cli.c -lhid -lsetupapi -lwinmm
+CXX ?= clang-cl
+CXXFLAGS ?= /O2 /W4 /EHsc /std:c++17 /D_CRT_SECURE_NO_WARNINGS
+teensy_loader_cli.exe: teensy_loader_cli.cpp
+	$(CXX) $(CXXFLAGS) /DUSE_WIN32 /Fe:$@ teensy_loader_cli.cpp /link hid.lib setupapi.lib winmm.lib
 
 
 else ifeq ($(OS), MACOSX)
 ifeq ($(USE_LIBUSB), YES)
-CC ?= gcc
-CFLAGS ?= -O2 -Wall
-teensy_loader_cli: teensy_loader_cli.c
-	$(CC) $(CFLAGS) -s -DUSE_LIBUSB -DMACOSX -o teensy_loader_cli teensy_loader_cli.c -lusb -I /usr/local/include -L/usr/local/lib
+CXX ?= c++
+CXXFLAGS ?= -O2 -Wall -std=c++17
+teensy_loader_cli: teensy_loader_cli.cpp
+	$(CXX) $(CXXFLAGS) -s -DUSE_LIBUSB -DMACOSX -o teensy_loader_cli teensy_loader_cli.cpp -lusb -I /usr/local/include -L/usr/local/lib
 	 
 else
-CC ?= gcc
+CXX ?= c++
 SDK ?= $(shell xcrun --show-sdk-path)
 #SDK ?= /Developer/SDKs/MacOSX10.6.sdk  # the old way...
 #SDK = /Developer_xcode32/SDKs/MacOSX10.5.sdk  # the very old way!
 #CC = /Developer_xcode32/usr/bin/gcc-4.0
 #CFLAGS = -O2 -Wall -arch i386 -arch ppc
-CFLAGS ?= -O2 -Wall
-teensy_loader_cli: teensy_loader_cli.c
+CXXFLAGS ?= -O2 -Wall -std=c++17
+teensy_loader_cli: teensy_loader_cli.cpp
 ifeq ($(SDK),)
 	$(error SDK was not found. To use this type of compilation please install Xcode)
 endif
-	$(CC) $(CFLAGS) -DUSE_APPLE_IOKIT -isysroot $(SDK) -o teensy_loader_cli teensy_loader_cli.c -Wl,-syslibroot,$(SDK) -framework IOKit -framework CoreFoundation
+	$(CXX) $(CXXFLAGS) -DUSE_APPLE_IOKIT -isysroot $(SDK) -o teensy_loader_cli teensy_loader_cli.cpp -Wl,-syslibroot,$(SDK) -framework IOKit -framework CoreFoundation
 
 endif
 
 else ifeq ($(OS), BSD)  # works on NetBSD and OpenBSD
-CC ?= gcc
-CFLAGS ?= -O2 -Wall
-teensy_loader_cli: teensy_loader_cli.c
-	$(CC) $(CFLAGS) -s -DUSE_UHID -o teensy_loader_cli teensy_loader_cli.c
+CXX ?= c++
+CXXFLAGS ?= -O2 -Wall -std=c++17
+teensy_loader_cli: teensy_loader_cli.cpp
+	$(CXX) $(CXXFLAGS) -s -DUSE_UHID -o teensy_loader_cli teensy_loader_cli.cpp
 
 
 endif
