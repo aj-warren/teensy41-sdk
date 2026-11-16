@@ -306,8 +306,8 @@ extern void gpio_null_handler_warning(void)
  * public inlines above. */
 static inline __attribute__((always_inline)) gpio_pin_t
 gpio_pin_const(uint8_t pin) {
-  gpio_pin_t d = {0};
-  TEENSY_GPIO_PIN_RESOLVE(d, pin, ((gpio_pin_t){0}));
+  gpio_pin_t d = {};
+  TEENSY_GPIO_PIN_RESOLVE(d, pin, ((gpio_pin_t){ }));
   return d;
 }
 

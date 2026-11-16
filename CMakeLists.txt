@@ -63,13 +63,45 @@ set(TEENSY_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/sdk/linker/imxrt1062_t41.l
 
 add_subdirectory(sdk)
 
-# Compile/link setup shared by the main application target and every
-# example; callers append their own -Wl,-Map when they want one.
-function(teensy_target_options target)
-    cmake_parse_arguments(OPT "WITH_MAP" "MAPFILE" "" ${ARGN})
-    add_executable(${target} ${OPT_UNPARSED_ARGUMENTS})
-    target_link_libraries(${target} PRIVATE teensy_sdk)
+# Usage target for conventional add_executable/add_library calls. The
+# firmware-only link options are interface requirements so they apply to the
+# final executable, not to intermediate static libraries.
+add_library(teensy41-sdk INTERFACE)
+target_link_libraries(teensy41-sdk INTERFACE teensy_sdk c m gcc)
+target_compile_definitions(teensy41-sdk INTERFACE ${TEENSY_DEFINITIONS})
+target_compile_options(teensy41-sdk INTERFACE
+    ${TEENSY_CPU_FLAGS}
+    ${TEENSY_SYSROOT_INCLUDE_FLAG}
+    ${TEENSY_GCC_INCLUDE_FLAG}
+    -Wall
+    -Wextra
+    -ffunction-sections
+    -fdata-sections
+    -Os
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>)
+target_link_options(teensy41-sdk INTERFACE
+    --specs=nano.specs
+    --specs=nosys.specs
+    ${TEENSY_CPU_FLAGS}
+    -nostdlib
+    -nostartfiles
+    -nodefaultlibs
+    "-T${TEENSY_LINKER_SCRIPT}"
+    -Wl,--gc-sections
+    -Wl,--relax
+    -Wl,-u,_sbrk
+    # One RWX load segment is intentional: the ITCM image is loaded from
+    # flash and copied to RAM at startup, so text/code/data share a
+    # segment (same layout as Teensyduino binaries). Silence the binutils
+    # 2.39+ RWX warning.
+    -Wl,--no-warn-rwx-segments)
+set_property(TARGET teensy41-sdk APPEND PROPERTY
+    INTERFACE_LINK_DEPENDS "${TEENSY_LINKER_SCRIPT}")
 
+# Apply the SDK's compile setup to a target without applying firmware link
+# options. This is useful for static libraries.
+function(teensy_apply_compile_options target)
+    target_link_libraries(${target} PRIVATE teensy_sdk)
     target_compile_definitions(${target} PRIVATE ${TEENSY_DEFINITIONS})
     target_compile_options(${target} PRIVATE
         ${TEENSY_CPU_FLAGS}
@@ -81,8 +113,12 @@ function(teensy_target_options target)
         -fdata-sections
         -Os
         $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>)
+endfunction()
 
+function(teensy_apply_link_options target)
     target_link_options(${target} PRIVATE
+        --specs=nano.specs
+        --specs=nosys.specs
         ${TEENSY_CPU_FLAGS}
         -nostdlib
         -nostartfiles
@@ -90,14 +126,23 @@ function(teensy_target_options target)
         "-T${TEENSY_LINKER_SCRIPT}"
         -Wl,--gc-sections
         -Wl,--relax
+        -Wl,-u,_sbrk
         # One RWX load segment is intentional: the ITCM image is loaded from
         # flash and copied to RAM at startup, so text/code/data share a
         # segment (same layout as Teensyduino binaries).  Silence the
         # binutils 2.39+ RWX warning.
         -Wl,--no-warn-rwx-segments)
-
-    target_link_libraries(${target} PRIVATE gcc)
+    target_link_libraries(${target} PRIVATE teensy_sdk c m gcc)
     set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${TEENSY_LINKER_SCRIPT}")
+endfunction()
+
+# Create a firmware executable. Static libraries should use add_library()
+# followed by teensy_apply_compile_options() instead.
+function(teensy_target_options target)
+    cmake_parse_arguments(OPT "WITH_MAP" "MAPFILE" "" ${ARGN})
+    add_executable(${target} ${OPT_UNPARSED_ARGUMENTS})
+    teensy_apply_compile_options(${target})
+    teensy_apply_link_options(${target})
     if(OPT_WITH_MAP AND OPT_MAPFILE)
         target_link_options(${target} PRIVATE
             "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/${OPT_MAPFILE}")

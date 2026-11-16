@@ -16,6 +16,7 @@ add_library(teensy_sdk STATIC
     src/printf_backend.c
     src/rtc.c
     src/startup.c
+    src/syscalls.c
     src/tempmon.c
     src/time.c
     src/trng.c

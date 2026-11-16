@@ -106,6 +106,44 @@ the device verifies the complete staged image before activation. The uploader's
 The application entry point is `src/main.c`. The platform implementation is
 under `sdk/`, with public headers in `sdk/include/teensy/`.
 
+## Using the SDK from another CMake project
+
+The ARM toolchain file makes CMake use `arm-none-eabi-gcc` for compilation and
+linking; it does not change the normal CMake target model. `add_executable`
+still creates an executable and `add_library(... STATIC ...)` still creates a
+static archive. The SDK's `teensy_sdk` target is already a static library.
+The `teensy41-sdk` interface target packages the SDK library and the Teensy
+compile/link settings for final firmware targets.
+
+When this project is added with `add_subdirectory`, a static library can use
+normal CMake target commands:
+
+```cmake
+add_library(my_teensy_code STATIC my_teensy_code.c)
+target_link_libraries(my_teensy_code PRIVATE teensy41-sdk)
+```
+
+The final firmware must still be an executable so the Teensy startup code,
+linker script, and memory layout can be applied:
+
+```cmake
+add_executable(my_firmware main.c)
+target_link_libraries(my_firmware PRIVATE my_teensy_code teensy41-sdk)
+```
+
+The older `teensy_target_options` helper remains available. A static library
+is an archive of object files, so it cannot produce a `.hex` file or replace
+the final firmware executable.
+
+## C library
+
+The SDK links the ARM toolchain's vendored `newlib-nano` through the
+`teensy41-sdk` target. This provides standard `malloc`, `free`, and other C
+library functions. The SDK supplies `_sbrk()` using the linker-defined RAM
+heap and routes `_read()`/`_write()` through USB serial. The existing SDK
+`printf` backend remains enabled so formatted output keeps using the SDK's USB
+serial behavior.
+
 The SDK currently provides GPIO, GPIO interrupts, PWM, ADC, clocks, timing,
 UART, I2C, USB CDC, a WDOG3 (RTWDOG) watchdog, and a compact `printf`
 implementation. Include `<teensy/watchdog.h>` to start, refresh, inspect, or
